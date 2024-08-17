@@ -956,7 +956,7 @@
             "readOnly": "true",
             "type": "string"
           },
-          "name": {
+          "Name": {
             "description": "The name of the configuration",
             "type": "string"
           }
@@ -7664,7 +7664,7 @@
         "enum": [
           "RANDOM",
           "PSEUDORANDOM",
-          "<nil>"
+          "null"
         ],
         "type": "string"
       },
