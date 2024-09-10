@@ -1,0 +1,11 @@
+templateDir: /local/specs/py-templates
+additionalProperties:
+files:
+  __init__dynamic_model.mustache:
+    templateType: SupportingFiles
+    folder: cyperf/dynamic_models
+    destinationFilename: __init__.py
+  dynamic_model_meta.mustache:
+    templateType: SupportingFiles
+    folder: cyperf
+    destinationFilename: dynamic_model_meta.py

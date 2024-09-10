@@ -1,0 +1,151 @@
+# coding: utf-8
+
+from functools import partial
+from pydantic import TypeAdapter
+
+from {{packageName}} import LinkNameException
+from {{packageName}} import ApiClient
+from {{packageName}} import ApiException
+
+class DynamicModel(type):
+    def __new__(cls, name, bases, dct):
+        if 'base_model' in dct:
+            inner_model = dct['__annotations__']['base_model']
+            local_fields = {}
+            fields = []
+            try:
+                fields = inner_model.__fields__
+            except AttributeError as e:
+                pass
+            for key in fields:
+                dct[key] = property(fget=partial(cls.get_by_link, key), fset=partial(cls.set_base_attr, key))
+                local_fields[key] = None
+            dct['_local_fields'] = local_fields
+            dct['api_client'] = None
+        c =  super().__new__(cls, name, bases, dct)
+        c.update = lambda self: cls.update(self)
+        c.refresh = lambda self: cls.refresh(self)
+        c.link_based_request = lambda self, link_name, method, return_type = None, body = None, query=[]: cls.link_based_request(self, link_name, method, return_type, body, query)
+        return c
+
+    @classmethod
+    def dynamic_wrapper(cls, obj: any, api_client: ApiClient = None):
+        if isinstance(obj, list):
+            return [cls.dynamic_wrapper(item, api_client) for item in obj]
+        if isinstance(obj, dict):
+            return {key:cls.dynamic_wrapper(val, api_client) for key,val in obj}
+        else:
+            import {{packageName}}
+            try:
+                dyn_class = getattr({{packageName}}.dynamic_models, obj.__class__.__name__)
+            except AttributeError:
+                return obj
+            dyn_obj = dyn_class(obj)
+            dyn_obj.api_client = api_client
+            return dyn_obj
+
+
+    @classmethod
+    def get_by_link(cls, key, self):
+        if self._local_fields[key] != None:
+           return self._local_fields[key]
+        field = getattr(self.base_model, key)
+        if field is None:
+            field_info = self.base_model.__class__.__fields__[key]
+            try:
+                field = self.link_based_request(field_info.alias, "GET", return_type=field_info.annotation)
+            except LinkNameException as e:
+                field = self.link_based_request(key, "GET", return_type=field_info.annotation)
+        setattr(self.base_model, key, field)
+        dyn_field = cls.dynamic_wrapper(field, self.api_client)
+        self._local_fields[key] = dyn_field
+        return dyn_field
+
+    @classmethod
+    def set_base_attr(cls, key, self, obj):
+        self._local_fields[key] = cls.dynamic_wrapper(obj, self.api_client)
+        setattr(self.base_model, key, obj)
+
+    @classmethod
+    def update(cls, self):
+        try:
+            d = self.base_model.to_dict()
+            del d['links']
+            self.link_based_request("self", "PATCH", body=d)
+        except ApiException as e:
+            if e.status != 405:
+                raise e
+            full_body = self.link_based_request("self", "GET", return_type=self.base_model.__class__, query=[("include", "all")])
+            for field in (field for field in self._local_fields if self._local_fields[field] != None):
+                val = self._local_fields[field]
+                if isinstance(val.__class__, DynamicModel):
+                    val = val.base_model
+                setattr(full_body, field, val)
+            self.link_based_request("self", "PUT", body=full_body)
+
+
+    @classmethod
+    def refresh(cls, self):
+        self.base_model = self.link_based_request("self", "GET", return_type=self.base_model.__class__)
+                 
+
+    @classmethod
+    def link_based_request(cls, self, link_name, method, return_type = None, body = None, query=[]):
+        if self.base_model.links == None:
+            raise Exception("You must allow links to be present to use automatic retrieval functions.")
+        if link_name == 'self':
+            self_links = [link for link in self.base_model.links if link.rel == link_name]
+        else:
+            self_links = [link for link in self.base_model.links if link.rel == "child" and link.name == link_name]
+        if len(self_links) == 0:
+            raise LinkNameException(f"Missing {link_name} link.")
+        self_link = self_links[0]
+        _host = None
+        _collection_formats: Dict[str, str] = {
+        }
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = query
+        _header_params: Dict[str, Optional[str]] = {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+        if isinstance(body.__class__, DynamicModel):
+            body = body.base_model
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+        if 'Content-Type' not in _header_params:
+            _header_params['Content-Type'] = self.api_client.select_header_content_type(
+                [
+                    'application/json'
+                ]
+        )
+        _auth_settings: List[str] = [
+            'OAuth2',
+        ]
+        _param = self.api_client.param_serialize(
+            method=method,
+            resource_path=self_link.href,
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=body,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host
+        )
+        response_data = self.api_client.call_api(
+            *_param
+        )
+        response_data.read()
+        if response_data.status > 299:
+            ApiException.from_response(http_resp=response_data, body=response_data.data, data=None)
+        if return_type != None:
+            ta = TypeAdapter(return_type)
+            return ta.validate_json(response_data.data)

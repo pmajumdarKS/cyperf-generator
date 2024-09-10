@@ -1,0 +1,14 @@
+# coding: utf-8
+
+# flake8: noqa
+{{>partial_header}}
+
+from {{packageName}} import DynamicModel
+import {{packageName}}
+
+# import models into model package
+{{#models}}
+{{#model}}
+{{classname}} = DynamicModel('{{classname}}', (), {} )
+{{/model}}
+{{/models}}

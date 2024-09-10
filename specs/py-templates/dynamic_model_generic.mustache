@@ -1,0 +1,8 @@
+from {{packageName}} import DynamicModel
+from {{packageName}}.models import {{classname}} as Model{{classname}}
+
+
+class {{classname}}(metaclass=DynamicModel):
+    base_model : Model{{classname}} = None
+    def __init__(self, model{{classname}} : Model{{classname}}):
+        self.base_model = model{{classname}}
