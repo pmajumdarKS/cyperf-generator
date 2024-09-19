@@ -50,6 +50,9 @@ class DynamicList(UserList):
             self.data[i] = item
             self.dyn_data[i] = DynamicModel.dynamic_wrapper(item, self.api_client)
 
+    def __repr__(self):
+        return f'[{",".join([repr(x) for x in self.dyn_data])}]'
+
     def append(self, item):
         if isinstance(item.__class__, DynamicModel):
             self.data.append(item.base_model)
@@ -148,6 +151,8 @@ class DynamicModel(type):
             local_fields[key] = None
         dct['_model_fields'] = local_fields
         dct['__init__'] = lambda self, base_model: cls.init(self, base_model)
+        dct['__str__'] = lambda self: cls.to_str(self)
+        dct['__repr__'] = lambda self: cls.repr(self)
         if name == "AsyncContext":
            dct['await_completion'] = lambda self, get_final_result = True, poll_time = 1: cls.poll(self, get_final_result = get_final_result, poll_time = poll_time)
         c =  super().__new__(cls, name, bases, dct)
@@ -169,19 +174,27 @@ class DynamicModel(type):
         self.base_model = base_model
 
     @classmethod
+    def to_str(cls, self) -> str:
+        """Returns the string representation of the actual instance"""
+        return f"{self.base_model}"
+
+    @classmethod
+    def repr(cls, self) -> str:
+        """Returns the string representation of the actual instance"""
+        return f"Dynamic{repr(self.base_model)}"
+
+    @classmethod
     def dynamic_wrapper(cls, obj: any, api_client: ApiClient = None):
         if isinstance(obj, list):
             l = DynamicList(obj, api_client)
-            for i in l:
-                if isinstance(i.__class__, DynamicModel) and i.links:
-                    i.refresh()
             return l
-        if isinstance(obj, dict):
+        elif isinstance(obj, dict):
             d = {key:cls.dynamic_wrapper(obj[key], api_client) for key in obj}
-            for k in d:
-                if isinstance(d[k].__class__, DynamicModel) and d[k].links:
-                    d[k].refresh()
             return d
+        elif "actual_instance" in dir(obj):
+            return cls.dynamic_wrapper(obj.actual_instance, api_client)
+        elif ("links" not in dir(obj)) and (obj.__class__.__name__ != "AsyncContext"):
+            return obj
         else:
             import {{packageName}}.dynamic_models
             try:
@@ -249,7 +262,7 @@ class DynamicModel(type):
             time.sleep(poll_time)
             op = cls.dynamic_wrapper(cls.link_based_request(op, None, "GET", return_type=self.base_model.__class__, href=self.url), api_client = self.api_client)
         if op.state == "ERROR":
-            raise Exception(f"Error running operation {op.id} of type {op.type}: {op.message}")
+            raise ApiException(f"Error running operation {op.id} of type {op.type}: {op.message}")
         if op.result_url and get_final_result:
             return cls.link_based_request(op, None, "GET", return_type=Any, href=op.result_url)
         return op.result
